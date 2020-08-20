@@ -82,6 +82,8 @@ print (row_format.format(*workdays))
 #Abfrage von Urlaubs- und Gleittagen etc. und Anpassen der Liste
 u = [int(item) for item in input("Bitte Tage eingeben, an denen nicht gearbeitet wurde (Urlaub, Gleittag, etc. mit Leerzeichen getrennt) ").split()]
 workdays = [item for item in workdays if not item in u]
+
+#Update Template
 row_format ="{:>5}" * (len(workdays))
 
 #Abfrage der regulären Arbeitszeit 
@@ -98,24 +100,23 @@ while sw != 'J' and sw != 'N':
 #Händische Eingabe
 if sw == 'J':
     for day in workdays:
-        wh = float(input("Bitte Arbeitszeit eingeben für den "+str(day)+'.'+str(month)+'.'+str(year)+ ' (Standard ' + str(regwh) + 'h) ').replace(',','.') or '7.8')
-        workhours.append(wh)
+        workhours.append(float(input("Bitte Arbeitszeit eingeben für den "+str(day)+'.'+str(month)+'.'+str(year)+ ' (Standard ' + str(regwh) + 'h) ').replace(',','.') or '7.8'))
 #Automatische Generierung
 else:
     #Gleitzeit abfragen
-    glzsa = timetofloat(input("Bitte Gleitzeitsaldo am Monatsanfang laut Zeitausweis eingeben (hh:mm) "))
-    glzse = timetofloat(input("Bitte Gleitzeitsaldo am Monatsende laut Zeitausweis eingeben (hh:mm) "))
+    glzsa = timetofloat(input("Bitte Gleitzeitsaldo am Monatsanfang laut Zeitausweis eingeben (hh:mm, Standard 0:00) ") or '0:00')
+    glzse = timetofloat(input("Bitte Gleitzeitsaldo am Monatsende laut Zeitausweis eingeben (hh:mm, Standard 0:00) ") or '0:00')
 
     totwh = glzse-glzsa+regwh*len(workdays)
     restwh = totwh
     # print (glzse, glzsa, glzse-glzsa, regwh*len(workdays), avwh, avwh*len(workdays))
     #Würfel für jeden Tag bis auf den letzten eine Arbeitszeit aus einer Gaussverteilung um die Durchschnittliche tägliche Arbeitszeit
     #Dabei wird die schon verwendete totale Zeit berücksichtigt um Ausreisser am Ende des Monats zu verhindern
-    for days in workdays[:-1]:
+    for i, days in enumerate(workdays[:-1]):
         wh = 11
         #Nicht mehr als 10 Stunden Arbeit bitte
         while wh > 10:
-            wh = round(random.gauss(restwh/(len(workdays)-len(workhours)), sigma),1)
+            wh = round(random.gauss(restwh/(len(workdays)-i), sigma),1)
         workhours.append(wh)
         restwh -= wh
     #Der letzte Tag bekommt die verbleibenden Stunden
@@ -128,12 +129,8 @@ else:
 #Kostenträger-Abfrage. Per Default werden alle KTs der neuen Zeitaufschreibung verwendet.
 kts = input("Bitte Liste der Kostenträger eingeben (mit Leerzeichen getrennt, leere Eingabe für alle) ").split() or ['3025501', '3025502', '3025503', '3025504', '3025505', '3025515', '3025530']
 #Kurze Eingaben werden zu reales RD KTs aufgeblasen
-for kti in range(len(kts)):
-    if len(kts[kti]) == 1:
-        kts[kti] = '302550' + kts[kti]
-    elif len(kts[kti]) == 2:
-        kts[kti] = '30255' + kts[kti]
-        
+kts = ['302550' + kt if len(kt) == 1 else '30255' + kt if len(kt) == 2 else kt for kt in kts ]
+
 #Liste der Arbeitsanteile je KT
 frac = []
 #Bookkeeping der eingegebenen Dezimalstellen zur korrekten Darstellung der automatisch berechneten Rests
@@ -158,36 +155,30 @@ if (sum(frac) < 1.0):
 elif (len(frac) < len(kts)): kts = kts[:len(frac)]
 
 #KTs ohne Arbeitsanteil werden entfernt
-nkts = []
-for i in range(len(kts)):
-    if frac[i] > 0:
-        nkts.append(kts[i])
-kts = nkts
+kts = [kt for (kt, f) in zip(kts,frac) if f > 0]
 frac = [item for item in frac if item > 0]
 # print (kts, frac)
     
 #Liste mit einer Liste von Arbeitsstunden je KT
-kttimes = []
-for kt in kts:
-    kttimes.append([])
+kttimes = [[] for kt in kts]
 
 #Jetzt geht die eigentliche Arbeit los: Wir loopen über alle Arbeitstage
-for day in range(len(workhours)):
+for day, wh in enumerate(workhours):
     totlen = 0
     #Arbeitstage mit 0 Stunden Arbeitszeit werden ignoriert
-    if workhours[day] == 0:
-        for kti in range(len(kts)):
-            kttimes[kti].append(0)
+    if wh == 0:
+        for ktl in kttimes:
+            ktl.append(0)
         continue
     #Für jeden KT bis auf den letzen werden Arbeitzeiten aus einem Gauss um den Idealwert gewürfelt
-    for kti in range(len(kts)-1):
-        time = round(random.gauss(frac[kti]*workhours[day], sigma),1)
+    for kti, ktl in enumerate(kttimes[:-1]):
+        time = round(random.gauss(frac[kti]*wh, sigma),1)
         #Negative Zeiten gibt es nicht
         if time < 0: time = 0
-        kttimes[kti].append(time)
-        totlen += kttimes[kti][day]
+        ktl.append(time)
+        totlen += time
     #Der letzte KT bekommt den Rest der noch übrigen Zeit für den Tag
-    kttimes[-1].append(round(workhours[day]-totlen,1))
+    kttimes[-1].append(round(wh-totlen,1))
     
 #Und nun zur Ausgabe
 totwh = sum(workhours)
@@ -197,9 +188,9 @@ print('Arbeitszeit\t',row_format.format(*workhours))
 
 
 worktime = []
-for kti in range(len(kts)):
-    print('KT '+kts[kti]+'\t', row_format.format(*kttimes[kti]))
-    worktime.append(sum(kttimes[kti]))
+for kti, ktl in enumerate(kttimes):
+    print('KT '+kts[kti]+'\t', row_format.format(*ktl))
+    worktime.append(sum(ktl))
 print()
 #Crosscheck dass auch alles richtig ist
 print('Arbeitsanteil je KT')
