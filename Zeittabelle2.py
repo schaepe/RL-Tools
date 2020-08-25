@@ -9,8 +9,10 @@ Created on Fri Aug 14 13:52:11 2020
 import sys
 import random
 from itertools import zip_longest, accumulate
+import decimal
+from decimal import Decimal
 
-session = {}
+decimal.getcontext().rounding = decimal.ROUND_HALF_UP
 sigma = .5
 
 def make_parser(fieldwidths):
@@ -39,50 +41,50 @@ def filterZeitausweis(infile):
             break;
     return outdata
         
-def timetofloat(timestr):
-    sign = 1.
-    if timestr.startswith('-'):
-        sign = -1.
-        timestr = timestr[1:]
-    timestr = timestr.replace('.',':')
+def timetoDecimal(timestr):
     if ',' in timestr:
-        return (float(timestr.replace(',','.')))
+        return (Decimal(timestr.replace(',','.')))
+    timestr = timestr.replace('.',':')
+    sign = Decimal('1.0')
+    if timestr.startswith('-'):
+        sign = Decimal('-1.0')
+        timestr = timestr[1:]
     hm = timestr.split(':')
-    return float(hm[0]) + float(hm[1])/60.
+    return sign * (Decimal(hm[0]) + Decimal(hm[1])/60)
 
 def calculatewhcorr(modifiers):
-    corr = 0.0
-    away = 0.0
+    corr = Decimal('0.0')
+    away = Decimal('0.0')
     lmod = []
-    for i in range(len(modifiers)-1):
+    for i in range(0,len(modifiers)-1,2):
         lmod.append((modifiers[i],modifiers[i+1]))
-        i += 2
+    # print((lmod))
     for mod in lmod:
-        if mod[0] == '':
+        if mod[0] == '   ':
             continue
-        elif mod[1] == '':
+        elif mod[1] == '     ':
             continue
-        elif mod[0] == 'BA':
-            away += timetofloat(mod[1])
-        elif mod[0] == 'KR':
-            away += timetofloat(mod[1])
+        elif mod[0] == 'BA ':
+            away += timetoDecimal(mod[1])
+        elif mod[0] == 'KR ':
+            away += timetoDecimal(mod[1])
         elif mod[0] == 'URL':
-            away += timetofloat(mod[1])
-        elif mod[0] == 'MP':
-            corr -= timetofloat(mod[1])
+            away += timetoDecimal(mod[1])
+        elif mod[0] == 'MP ':
+            corr -= timetoDecimal(mod[1])
         elif mod[0] == 'MXA':
-            corr -= timetofloat(mod[1])
-        elif mod[0] == 'RZ':
-            corr -= timetofloat(mod[1])
+            corr -= timetoDecimal(mod[1])
+        elif mod[0] == 'RZ ':
+            corr -= timetoDecimal(mod[1])
         elif mod[0] == 'GZ+':
-            corr += timetofloat(mod[1])
-        elif mod[0] == 'GR':
-            corr += timetofloat(mod[1])
-        elif mod[0] == 'GA':
-            corr += timetofloat(mod[1])
+            corr += timetoDecimal(mod[1])
+        elif mod[0] == 'GR ':
+            corr += timetoDecimal(mod[1])
+        elif mod[0] == 'GA ':
+            corr += timetoDecimal(mod[1])
     return (corr, away)
             
-def parseZeitausweis(input_filename):
+def parseZeitausweis(input_filename, session):
     with open(input_filename, "r") as input_file:
         if 'workdays' not in session:
             session['workdays'] = []
@@ -91,24 +93,24 @@ def parseZeitausweis(input_filename):
         if 'awayhours' not in session:
             session['awayhours'] = []
         data = filterZeitausweis(input_file)
-        #Wochenenden entfernen
-        data = [item for item in data if not 'S' in item[0]]
-        #Urlaube entfernen
-        data = [item for item in data if not (item[10] == 'URL' and item[11] == '     ')]
+        #Zweizeilige Einträge zusammenfassen
         for i, line in enumerate(data):
             if line[0] == '  ':
                 data[i-1] += line[10:]
         data = [item for item in data if not item[0] == '  ']
+        #Wochenenden und Feiertage entfernen
+        data = [item for item in data if not item[2] == '    ']
      
         
         for line in data:
             session['workdays'].append(line[0])
             timemod = calculatewhcorr(line[10:])
-            session['workhours'].append(round(timetofloat(line[8]) + timemod[0],1))
-            session['awayhours'].append(timemod[1])
+            # print(line[0], line[8], timetoDecimal(line[8]), timemod[0])
+            session['workhours'].append(round(timetoDecimal(line[8]) + timemod[0],1))
+            session['awayhours'].append(round(timemod[1],1))
     return
 
-def cleanKTs():
+def cleanKTs(session):
     #print (session['kts'])
     #Kurze Eingaben werden zu reales RD KTs aufgeblasen
     session['kts'] = ['302550' + kt if len(kt) == 1 else '30255' + kt if len(kt) == 2 else kt for kt in session['kts'] ]
@@ -120,16 +122,17 @@ def cleanKTs():
     # print (session['kts'], session['frac'])    
     return
 
-def getFracs():
+def getFracs(session):
     if 'frac' not in session:
-        session['frac'] = []    #Bookkeeping der eingegebenen Dezimalstellen zur korrekten Darstellung der automatisch berechneten Rests
-    maxdig = 0
+        session['frac'] = []    
+    #Bookkeeping der eingegebenen Dezimalstellen zur korrekten Darstellung der automatisch berechneten Rests
+    #maxdig = 0
     
     #Abfrage der Arbeitsanteile für alle KTs
     for kt in session['kts'][:-1]: 
         t = input("Bitte nominellen Arbeitsanteil für Kostenträger " + str(kt) + " angeben (dezimal, Standard 0) ").replace(',','.') or '0'
-        session['frac'].append(float(t))
-        if len(t.split(".")[-1]) > maxdig: maxdig = len(t.split(".")[-1])
+        session['frac'].append(Decimal(t))
+        #if len(t.split(".")[-1]) > maxdig: maxdig = len(t.split(".")[-1])
         #Mehr als 100% Arbeitsleistung sind leider nicht zulässig
         if (sum(session['frac']) > 1.0):
             print ('FEHLER: Summe der Arbeitsanteile ist größer als 1,0')
@@ -138,11 +141,11 @@ def getFracs():
         if (sum(session['frac']) == 1.0): break
     #Wenn noch nicht alles verteilt ist bekommt der letzte KT den Rest
     if (sum(session['frac']) < 1.0):
-        session['frac'].append(round(1.0-sum(session['frac']), maxdig))
+        session['frac'].append(round(1-sum(session['frac']), maxdig))
         print("Nomineller Arbeitsanteil für Kostenträger " + str(session['kts'][-1]) + ": " + str(session['frac'][-1])) 
     return    
 
-def computeTable():
+def computeTable(session):
     #print (session['kts'], session['frac'])
     #Liste mit einer Liste von Arbeitsstunden je KT
     if 'kttimes' not in session:
@@ -151,7 +154,7 @@ def computeTable():
     
     #Jetzt geht die eigentliche Arbeit los: Wir loopen über alle Arbeitstage
     for day, wh in enumerate(session['workhours']):
-        totlen = 0
+        totlen = Decimal('0')
         #Arbeitstage mit 0 Stunden Arbeitszeit werden ignoriert
         if wh == 0:
             for ktl in session['kttimes']:
@@ -159,16 +162,17 @@ def computeTable():
             continue
         #Für jeden KT bis auf den letzen werden Arbeitzeiten aus einem Gauss um den Idealwert gewürfelt
         for kti, ktl in enumerate(session['kttimes'][:-1]):
-            time = round(random.gauss(session['frac'][kti]*wh, sigma),1)
+            time = round(random.gauss(float(session['frac'][kti]*wh), sigma),1)
             #Negative Zeiten gibt es nicht
             if time < 0: time = 0
-            ktl.append(time)
-            totlen += time
+            dtime = round(Decimal(time),1)
+            ktl.append(dtime)
+            totlen += dtime
         #Der letzte KT bekommt den Rest der noch übrigen Zeit für den Tag
         session['kttimes'][-1].append(round(wh-totlen,1))
     return
 
-def printTable():
+def printTable(session):
     #Template für formatierte Ausgabe
     row_format ="{:>5}" * (len(session['workdays']))
 
@@ -181,35 +185,37 @@ def printTable():
     print()
     return
 
-def printCrosscheck():
+def printCrosscheck(session):
     totwh = sum(session['workhours'])
     worktime = []
     for ktl in session['kttimes']: worktime.append(sum(ktl))
     #Crosscheck dass auch alles richtig ist
     print('Arbeitsanteil je KT')
     for kti in range(len(session['kts'])):
-        print('KT ' + session['kts'][kti], str(round(worktime[kti]/totwh*100,1))+'%')
+        print('KT ' + session['kts'][kti], str(round(float(worktime[kti]/totwh*100),1))+'%')
 
+
+session = {}
 
 input_filename = input("Bitte Dateiname des Zeitausweises angeben ")
 
-parseZeitausweis(input_filename)
+parseZeitausweis(input_filename, session)
 
 if 'kts' not in session:
     session['kts'] = []
 #Kostenträger-Abfrage. Per Default werden alle KTs der neuen Zeitaufschreibung verwendet.
 session['kts'] = input("Bitte Liste der Kostenträger eingeben (mit Leerzeichen getrennt, leere Eingabe für alle) ").split() or ['3025501', '3025502', '3025503', '3025504', '3025505', '3025515', '3025530']
 
-getFracs()
+getFracs(session)
 # print ('1', session['kts'], session['frac'])    
 
-cleanKTs()
+cleanKTs(session)
 # print ('2', session['kts'], session['frac'])    
    
-computeTable()
+computeTable(session)
 # print ('3', session['kts'], session['frac'])    
     
 #Und nun zur Ausgabe
-printTable()
-printCrosscheck()
+printTable(session)
+printCrosscheck(session)
 
