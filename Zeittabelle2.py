@@ -31,15 +31,25 @@ def filterZeitausweis(infile):
     parse = make_parser(fieldwidths)
     outdata = []
     countseps = 0
+    firstline = ''
+    secondline = ''
     for line in infile:
+        if line == '\n':
+            continue
         if line.startswith('---'):
             countseps += 1
+            continue
+        if firstline == '':
+            firstline = line
+            continue
+        if secondline == '':
+            secondline = line
             continue
         if countseps == 3:
             outdata.append(parse(line))
         if countseps > 3:
             break;
-    return outdata
+    return (firstline, secondline, outdata)
         
 def timetoDecimal(timestr):
     if ',' in timestr:
@@ -92,7 +102,17 @@ def parseZeitausweis(input_filename, session):
             session['workhours'] = []
         if 'awayhours' not in session:
             session['awayhours'] = []
-        data = filterZeitausweis(input_file)
+        buff = filterZeitausweis(input_file)
+        fl = buff[0].split()
+        sl = buff[1].split()
+        if 'periode' not in session:
+            session['periode'] = fl[4]
+        if 'vorname' not in session:
+            session['vorname'] = sl[4]
+        if 'nachname' not in session:
+            session['nachname'] = sl[3][:-1]
+        data = buff[2]
+        print(fl, sl)
         #Zweizeilige Einträge zusammenfassen
         for i, line in enumerate(data):
             if line[0] == '  ':
@@ -158,7 +178,7 @@ def computeTable(session):
         #Arbeitstage mit 0 Stunden Arbeitszeit werden ignoriert
         if wh == 0:
             for ktl in session['kttimes']:
-                ktl.append(0)
+                ktl.append(Decimal('0'))
             continue
         #Für jeden KT bis auf den letzen werden Arbeitzeiten aus einem Gauss um den Idealwert gewürfelt
         for kti, ktl in enumerate(session['kttimes'][:-1]):
@@ -176,6 +196,8 @@ def printTable(session):
     #Template für formatierte Ausgabe
     row_format ="{:>5}" * (len(session['workdays']))
 
+    print()
+    print('Zeitnachweis für ' + session['vorname'] + ' ' + session['nachname'] + ' für die Zeit ' + session['periode'])
     print()
     print('Arbeitstage\t',row_format.format(*session['workdays']))
     print('Arbeitszeit\t',row_format.format(*session['workhours']))
