@@ -27,29 +27,28 @@ def make_parser(fieldwidths):
     return parse
 
 def filterZeitausweis(infile):
-    fieldwidths = (2, -1, 2, -4, 4, -1, 5, -1, 5, -1, 5, -1, 5, -1, 5, -1, 5, -1, 6, -1, 3, -1, 5, -1, 3, -1, 5, -1, 3, -1, 5)  # negative widths represent ignored padding fields
-    parse = make_parser(fieldwidths)
     outdata = []
-    countseps = 0
-    firstline = ''
-    secondline = ''
-    for line in infile:
-        if line == '\n':
-            continue
-        if line.startswith('---'):
-            countseps += 1
-            continue
-        if firstline == '':
-            firstline = line
-            continue
-        if secondline == '':
-            secondline = line
-            continue
-        if countseps == 3:
-            outdata.append(parse(line))
-        if countseps > 3:
-            break;
-    return (firstline, secondline, outdata)
+    fieldwidths = ()
+    fields = 0
+    #Leere Zeilen entfernen
+    infile = [line for line in infile if not (line.isspace() or line == '')]
+    separators = [i for i,x in enumerate(infile) if x.startswith('---')]
+    if len(separators) < 4:
+        print('FEHLER: Nicht genügend Trennzeilen im Zeitausweis')
+    if len(infile[separators[0]]) == 85:
+        fieldwidths = (2, -1, 5, -1, 4, -1, 5, -1, 5, -1, 5, -1, 5, -1, 5, -1, 5, -1, 6, -1, 3, -1, 5, -1, 3, -1, 5, -1, 3, -1, 5)  # negative widths represent ignored padding fields
+        fields = 16
+    elif len(infile[separators[0]]) == 80:
+        fieldwidths = (2, -1, 5, -1, 4, -1, 5, -1, 5, -1, 5, -1, 5, -1, 5, -1, 6, -1, 3, -1, 5, -1, 3, -1, 5, -1, 3, -1, 5)  # negative widths represent ignored padding fields
+        fields = 15
+    else:
+        print ('FEHLER: Unbekanntes Format des Zeitausweises')
+    parse = make_parser(fieldwidths)
+
+    firstline = infile[separators[0]-1]
+    secondline = infile[separators[1]-1]
+    outdata = [parse(line) for line in infile[separators[2]+1:separators[3]]]
+    return (firstline, secondline, outdata, fields)
         
 def timetoDecimal(timestr):
     if ',' in timestr:
@@ -95,14 +94,17 @@ def calculatewhcorr(modifiers):
     return (corr, away)
             
 def parseZeitausweis(input_filename, session):
-    with open(input_filename, "r") as input_file:
+    with open(input_filename, "r", encoding="utf-8-sig") as input_file:
         if 'workdays' not in session:
             session['workdays'] = []
         if 'workhours' not in session:
             session['workhours'] = []
         if 'awayhours' not in session:
             session['awayhours'] = []
-        buff = filterZeitausweis(input_file)
+        input_data = input_file.read()
+        #Linux-Windows linebreak
+        input_data.replace('\r','')
+        buff = filterZeitausweis(input_data.split('\n'))
         fl = buff[0].split()
         sl = buff[1].split()
         if 'periode' not in session:
@@ -112,11 +114,11 @@ def parseZeitausweis(input_filename, session):
         if 'nachname' not in session:
             session['nachname'] = sl[3][:-1]
         data = buff[2]
-        print(fl, sl)
+        fields = buff[3]
         #Zweizeilige Einträge zusammenfassen
         for i, line in enumerate(data):
             if line[0] == '  ':
-                data[i-1] += line[10:]
+                data[i-1] += line[fields-6:]
         data = [item for item in data if not item[0] == '  ']
         #Wochenenden und Feiertage entfernen
         data = [item for item in data if not item[2] == '    ']
@@ -124,9 +126,8 @@ def parseZeitausweis(input_filename, session):
         
         for line in data:
             session['workdays'].append(line[0])
-            timemod = calculatewhcorr(line[10:])
-            # print(line[0], line[8], timetoDecimal(line[8]), timemod[0])
-            session['workhours'].append(round(timetoDecimal(line[8]) + timemod[0],1))
+            timemod = calculatewhcorr(line[fields-6:])
+            session['workhours'].append(round(timetoDecimal(line[fields-8]) + timemod[0],1))
             session['awayhours'].append(round(timemod[1],1))
     return
 
@@ -178,7 +179,7 @@ def computeTable(session):
         #Arbeitstage mit 0 Stunden Arbeitszeit werden ignoriert
         if wh == 0:
             for ktl in session['kttimes']:
-                ktl.append(Decimal('0'))
+                ktl.append(Decimal('0.0'))
             continue
         #Für jeden KT bis auf den letzen werden Arbeitzeiten aus einem Gauss um den Idealwert gewürfelt
         for kti, ktl in enumerate(session['kttimes'][:-1]):
@@ -186,6 +187,7 @@ def computeTable(session):
             #Negative Zeiten gibt es nicht
             if time < 0: time = 0
             dtime = round(Decimal(time),1)
+            if totlen + dtime > wh: dtime = wh - totlen
             ktl.append(dtime)
             totlen += dtime
         #Der letzte KT bekommt den Rest der noch übrigen Zeit für den Tag
