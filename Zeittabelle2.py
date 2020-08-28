@@ -103,7 +103,7 @@ def parseZeitausweis(input_filename, session):
             session['awayhours'] = []
         input_data = input_file.read()
         #Linux-Windows linebreak
-        input_data.replace('\r','')
+        input_data = input_data.replace('\r','')
         buff = filterZeitausweis(input_data.split('\n'))
         fl = buff[0].split()
         sl = buff[1].split()
